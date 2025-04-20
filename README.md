@@ -2,6 +2,16 @@
 
 Modernus naujienlaiškių redaktorius knygynui "Knygospigiau".
 
+## Versijos
+
+### macOS
+- `Knygospigiau Newsletter.app` - pilnai sukompiliuota macOS versija
+- Tinka macOS 11.0 (Big Sur) ir naujesnėms versijoms
+- Apple Silicon (M1/M2) ir Intel procesoriai
+
+### Windows
+- Windows versija ruošiama
+
 ## Naujausi pakeitimai (v2.0)
 
 - Visiškai atnaujintas vartotojo sąsajos dizainas
