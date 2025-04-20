@@ -12,9 +12,18 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                           QLineEdit, QTextEdit, QLabel, QScrollBar, QColorDialog,
                           QComboBox, QFontComboBox, QTabWidget, QGridLayout,
-                          QDialog, QDialogButtonBox)
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QTextCursor, QColor, QFont
+                          QDialog, QDialogButtonBox, QGroupBox, QScrollArea,
+                          QInputDialog, QMessageBox, QSpinBox, QFileDialog,
+                          QMainWindow)
+from PyQt5.QtCore import Qt, QUrl
+from PyQt5.QtGui import QTextCursor, QColor, QFont, QPainter, QPen, QIcon, QTextCharFormat
+from PyQt5.QtSvg import QSvgWidget
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+import json
+import os
+from send_emails import send_email
+import sys
+import logging
 
 
 class LinkDialog(QDialog):
@@ -48,474 +57,719 @@ class LinkDialog(QDialog):
     def get_url(self):
         return self.url_input.text().strip()
 
-class Ui_Form(QWidget):
-    def __init__(self):
+class EmojiPicker(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Emoji Picker")
+        self.setFixedSize(350, 400)
+        
+        layout = QVBoxLayout()
+        self.web_view = QWebEngineView()
+        
+        # Load emoji data
+        emoji_data_path = os.path.join('data', 'emoji_data.json')
+        with open(emoji_data_path, 'r', encoding='utf-8') as f:
+            self.emoji_data = json.load(f)
+            
+        # Load the HTML template
+        template_path = os.path.join('templates', 'emoji_picker.html')
+        with open(template_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+            
+        # Replace emoji data placeholder
+        html_content = html_content.replace('{{ emoji_data }}', json.dumps(self.emoji_data))
+        
+        self.web_view.setHtml(html_content)
+        layout.addWidget(self.web_view)
+        self.setLayout(layout)
+
+class EmailSenderUI(QMainWindow):
+    def __init__(self, data_dir=None):
         super().__init__()
-        self.setupUi()
+        self.data_dir = data_dir
+        self.init_ui()
 
-    def setupUi(self):
-        self.setWindowTitle("Knygospigiau.lt naujienlaiškis ✅")
-        self.resize(1000, 800)
+    def load_emoji_data(self):
+        if not self.data_dir:
+            return {}
+            
+        try:
+            emoji_path = os.path.join(self.data_dir, 'emoji_data.json')
+            if not os.path.exists(emoji_path):
+                print(f"Emoji data file not found at: {emoji_path}")
+                return {}
+                
+            with open(emoji_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('categories', {})
+        except Exception as e:
+            print(f'Error loading emoji data: {str(e)}')
+            return {}
 
-        # Main layout
-        main_layout = QVBoxLayout()
-        self.setLayout(main_layout)
+    def init_ui(self):
+        self.setWindowTitle('Knygospigiau.lt Naujienlaiškių Sistema')
+        self.setGeometry(100, 100, 1200, 800)
+        self.setMinimumSize(800, 600)
 
-        # Subject
+        # Main widget and layout
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+
+        # Style
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: white;
+            }
+            QLineEdit, QTextEdit {
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 12px;
+                font-size: 14px;
+                min-width: 100px;
+            }
+            QPushButton {
+                background-color: #000;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 12px 24px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #333;
+            }
+            QPushButton:disabled {
+                background-color: #ccc;
+            }
+            QComboBox {
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 8px;
+                min-width: 150px;
+            }
+            QLabel {
+                font-size: 14px;
+                color: #333;
+            }
+        """)
+
+        # Subject input
+        subject_group = QGroupBox("Laiško antraštė")
         subject_layout = QHBoxLayout()
-        subject_label = QLabel("Laiško antraštė:")
-        self.subjectLineEdit = QLineEdit()
-        subject_layout.addWidget(subject_label)
-        subject_layout.addWidget(self.subjectLineEdit)
-        main_layout.addLayout(subject_layout)
+        subject_layout.setContentsMargins(15, 10, 15, 15)
+        self.subject_input = QLineEdit()
+        self.subject_input.setPlaceholderText("Įveskite laiško antraštę...")
+        self.subject_input.setStyleSheet('''
+            QLineEdit {
+                font-size: 14px;
+                padding: 8px;
+                border: 1px solid #e0e0e0;
+                border-radius: 4px;
+            }
+        ''')
+        subject_layout.addWidget(self.subject_input)
+        subject_group.setLayout(subject_layout)
+        main_layout.addWidget(subject_group)
 
-        # Font formatting
-        font_layout = QHBoxLayout()
-        
+        # Main content area
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(20)
+
+        # Left side - Editor (2/3 width)
+        editor_container = QWidget()
+        editor_container.setMinimumWidth(700)  # Reduced width
+        editor_layout = QVBoxLayout(editor_container)
+        editor_layout.setSpacing(10)
+        editor_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Formatting toolbar
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(10)
+        toolbar.setContentsMargins(0, 0, 0, 10)
+
         # Font family
-        self.fontComboBox = QFontComboBox()
-        self.fontComboBox.currentFontChanged.connect(self.change_font)
-        font_layout.addWidget(self.fontComboBox)
-        
+        self.font_family = QComboBox()
+        self.font_family.addItems([
+            'Arial', 'Helvetica', 'Times New Roman', 'Georgia',
+            'Courier New', 'Verdana', 'Tahoma', 'Trebuchet MS'
+        ])
+        self.font_family.setFixedWidth(200)
+        self.font_family.setStyleSheet('''
+            QComboBox {
+                padding: 8px;
+                border: 1px solid #000000;
+                border-radius: 4px;
+                background: white;
+            }
+        ''')
+        self.font_family.currentTextChanged.connect(self.change_font)
+        toolbar.addWidget(self.font_family)
+
         # Font size
-        self.fontSizeCombo = QComboBox()
-        sizes = ['8', '9', '10', '11', '12', '14', '16', '18', '20', '22', '24', '26', '28', '36', '48', '72']
-        self.fontSizeCombo.addItems(sizes)
-        self.fontSizeCombo.setCurrentText('12')
-        self.fontSizeCombo.currentTextChanged.connect(self.change_font_size)
-        font_layout.addWidget(self.fontSizeCombo)
+        self.font_size = QComboBox()
+        self.font_size.addItems(['8', '9', '10', '11', '12', '14', '16', '18', '20', '22', '24', '28', '32', '36'])
+        self.font_size.setCurrentText('14')
+        self.font_size.setFixedWidth(80)
+        self.font_size.setStyleSheet('''
+            QComboBox {
+                padding: 8px;
+                border: 1px solid #000000;
+                border-radius: 4px;
+                background: white;
+            }
+        ''')
+        self.font_size.currentTextChanged.connect(self.change_font_size)
+        toolbar.addWidget(self.font_size)
 
-        # Text alignment buttons
-        self.alignLeftButton = QPushButton("⫷")
-        self.alignLeftButton.setToolTip("Lygiuoti kairėje")
-        self.alignLeftButton.clicked.connect(lambda: self.align_text('left'))
-        
-        self.alignCenterButton = QPushButton("⫸⫷")
-        self.alignCenterButton.setToolTip("Centruoti")
-        self.alignCenterButton.clicked.connect(lambda: self.align_text('center'))
-        
-        self.alignRightButton = QPushButton("⫸")
-        self.alignRightButton.setToolTip("Lygiuoti dešinėje")
-        self.alignRightButton.clicked.connect(lambda: self.align_text('right'))
-        
-        font_layout.addWidget(self.alignLeftButton)
-        font_layout.addWidget(self.alignCenterButton)
-        font_layout.addWidget(self.alignRightButton)
-        
-        main_layout.addLayout(font_layout)
-
-        # Text formatting buttons
-        format_layout = QHBoxLayout()
-        
-        # Bold button
-        self.boldButton = QPushButton("B")
-        self.boldButton.setStyleSheet("font-weight: bold;")
-        self.boldButton.clicked.connect(self.toggle_bold)
-        
-        # Italic button
-        self.italicButton = QPushButton("I")
-        self.italicButton.setStyleSheet("font-style: italic;")
-        self.italicButton.clicked.connect(self.toggle_italic)
-        
-        # Underline button
-        self.underlineButton = QPushButton("U")
-        self.underlineButton.setStyleSheet("text-decoration: underline;")
-        self.underlineButton.clicked.connect(self.toggle_underline)
-        
-        # Color button
-        self.colorButton = QPushButton("Spalva")
-        self.colorButton.clicked.connect(self.choose_color)
-        
-        # Link buttons
-        self.linkButton = QPushButton("Įterpti nuorodą")
-        self.linkButton.clicked.connect(self.insert_link)
-        
-        self.removeLinkButton = QPushButton("Pašalinti nuorodą")
-        self.removeLinkButton.clicked.connect(self.remove_link)
-
-        format_layout.addWidget(self.boldButton)
-        format_layout.addWidget(self.italicButton)
-        format_layout.addWidget(self.underlineButton)
-        format_layout.addWidget(self.colorButton)
-        format_layout.addWidget(self.linkButton)
-        format_layout.addWidget(self.removeLinkButton)
-        format_layout.addStretch()
-        
-        main_layout.addLayout(format_layout)
-
-        # Holiday promotions and emoji tabs in horizontal layout
-        holiday_emoji_layout = QHBoxLayout()
-
-        # Holiday promotions combo box and insert button
-        promotion_layout = QVBoxLayout()
-        promotion_label = QLabel("Šventinės akcijos:")
-        self.promotionComboBox = QComboBox()
-        
-        # Dictionary of holiday promotions
-        self.holiday_promotions = {
-            "🎆 Naujųjų metų akcija": "Pasitikite Naujuosius Metus su knyga! 🎉\nVisiems grožinės literatūros leidiniams -25% nuolaida su kodu NAUJI2024\n",
-            "❤️ Valentino dienos akcija": "Meilės dienai - romantiškos knygos su -20% nuolaida! 💝\nNaudokite kodą MEILE214\n",
-            "🇱🇹 Vasario 16 akcija": "Švenčiame Lietuvos gimtadienį! Visoms lietuvių autorių knygoms -30% nuolaida.\nKodas: LIETUVA16\n",
-            "🐰 Velykų akcija": "Velykinės nuolaidos! 🥚\nVaikų literatūrai ir kulinarijos knygoms -25%\nKodas: VELYKOS2024\n",
-            "💐 Mamos dienos akcija": "Brangiai Mamai - ypatinga dovana! Visoms knygoms apie šeimą, sveikatą ir grožį -30%\nKodas: MAMYTE2024\n",
-            "👔 Tėvo dienos akcija": "Dovanokite Tėčiui įkvepiančią knygą! Biografijoms ir hobių knygoms -25%\nKodas: TETIS2024\n",
-            "🌿 Joninių akcija": "Trumpiausia naktis - ilgiausios nuolaidos! 24 valandas visoms knygoms -24%\nKodas: JONINES24\n",
-            "👑 Valstybės dienos akcija": "Švenčiame Lietuvos valstybingumą! Istorijos knygoms -30%\nKodas: MINDAUGAS713\n",
-            "🌾 Žolinės akcija": "Žolinės proga - gamtos, sodininkystės ir sveikatingumo knygoms -20%\nKodas: ZOLINE815\n",
-            "📚 Mokslo metų akcija": "Ruošiamės į mokyklą! Vadovėliams ir pratyboms -15%\nKodas: MOKYKLA2024\n",
-            "🎃 Helovino akcija": "Šiurpioms istorijoms ir mistiniams romanams -20%\nKodas: BOO1031\n",
-            "🕯️ Vėlinių akcija": "Prisiminkime... Biografijoms ir atsiminimų knygoms -20%\nKodas: ATMINTIS11\n",
-            "🏷️ Juodojo penktadienio akcija": "DIDŽIAUSIOS metų nuolaidos! Visoms knygoms iki -50%\nKodas: BLACK2024\n",
-            "🎄 Kalėdinė akcija": "Kalėdinės dovanos su meile! 🎁\nVisoms knygoms -30% nuolaida\nKodas: KALEDOS2024\n"
-        }
-        
-        self.promotionComboBox.addItems(self.holiday_promotions.keys())
-        self.insertPromotionButton = QPushButton("Įterpti akciją")
-        self.insertPromotionButton.clicked.connect(self.insert_promotion)
-        
-        promotion_layout.addWidget(promotion_label)
-        promotion_layout.addWidget(self.promotionComboBox)
-        promotion_layout.addWidget(self.insertPromotionButton)
-        
-        holiday_emoji_layout.addLayout(promotion_layout)
-
-        # Create tabs for emoji categories
-        emoji_tabs = QTabWidget()
-        
-        # Smileys and People
-        smileys_tab = QWidget()
-        smileys_layout = QGridLayout()
-        smileys_emojis = {
-            "😊": "Šypsena",
-            "😃": "Plati šypsena",
-            "😄": "Šypsena su akimis",
-            "😁": "Spinduliuojanti šypsena",
-            "😅": "Šypsena su prakaitu",
-            "😂": "Ašaros iš juoko",
-            "🤣": "Ridenasi iš juoko",
-            "😉": "Mirktelėjimas",
-            "😍": "Šypsena su širdelėmis",
-            "🥰": "Mylinti šypsena",
-            "😘": "Bučkis",
-            "🤗": "Apkabinimas",
-            "🤩": "Žvaigždėtos akys",
-            "😎": "Šypsena su akiniais",
-            "🥳": "Vakarėlio veidas",
-            "👋": "Mojuojanti ranka"
-        }
-        self.add_emojis_to_grid(smileys_layout, smileys_emojis)
-        smileys_tab.setLayout(smileys_layout)
-        emoji_tabs.addTab(smileys_tab, "😊 Šypsenėlės")
-
-        # Lithuanian Holidays
-        holidays_tab = QWidget()
-        holidays_layout = QGridLayout()
-        holidays_emojis = {
-            # Naujieji Metai
-            "🎆": "Fejerverkai",
-            "🎇": "Žiežirbos",
-            "🎉": "Šventės popetas",
-            # Vasario 16
-            "🇱🇹": "Lietuvos vėliava",
-            "🦁": "Vytis",
-            "🗽": "Laisvė",
-            # Velykos
-            "🥚": "Margutis",
-            "🐰": "Velykų kiškis",
-            "🌷": "Pavasario gėlė",
-            # Motinos diena
-            "💐": "Gėlių puokštė",
-            "🌺": "Gėlė mamai",
-            "💝": "Širdis su kaspinu",
-            # Joninės
-            "🌿": "Žolynai",
-            "🔥": "Joninių laužas",
-            "🌙": "Mėnulis",
-            # Mindaugo karūnavimas
-            "👑": "Karūna",
-            "⚔️": "Kardai",
-            "🏰": "Pilis",
-            # Žolinė
-            "🌾": "Javai",
-            "🌻": "Saulėgrąža",
-            "🍃": "Žalumynai",
-            # Vėlinės
-            "🕯️": "Žvakė",
-            "🌹": "Rožė",
-            "✨": "Žvaigždės",
-            # Kūčios ir Kalėdos
-            "🎄": "Kalėdų eglutė",
-            "⭐": "Betliejaus žvaigždė",
-            "🎁": "Dovana",
-            "🕊️": "Taikos balandis",
-            "❄️": "Snaigė",
-            "⛄": "Sniego senis"
-        }
-        self.add_emojis_to_grid(holidays_layout, holidays_emojis)
-        holidays_tab.setLayout(holidays_layout)
-        emoji_tabs.addTab(holidays_tab, "🇱🇹 Šventės")
-
-        # Books and Reading
-        books_tab = QWidget()
-        books_layout = QGridLayout()
-        books_emojis = {
-            "📚": "Knygos",
-            "📖": "Atverta knyga",
-            "📕": "Raudona knyga",
-            "📗": "Žalia knyga",
-            "📘": "Mėlyna knyga",
-            "📙": "Oranžinė knyga",
-            "📓": "Užrašų knygelė",
-            "📔": "Dekoruota knyga",
-            "📒": "Užrašinė",
-            "📑": "Žymekliai",
-            "🔖": "Knygos žymeklis",
-            "✏️": "Pieštukas",
-            "📝": "Užrašai",
-            "🎯": "Taikinys",
-            "📰": "Laikraštis",
-            "🗞️": "Suvyniotas laikraštis"
-        }
-        self.add_emojis_to_grid(books_layout, books_emojis)
-        books_tab.setLayout(books_layout)
-        emoji_tabs.addTab(books_tab, "📚 Knygos")
-
-        # Shopping and Gifts
-        shopping_tab = QWidget()
-        shopping_layout = QGridLayout()
-        shopping_emojis = {
-            "🎁": "Dovana",
-            "🎀": "Kaspinas",
-            "🏷️": "Etiketė",
-            "💝": "Širdis su kaspinu",
-            "💰": "Pinigų maišas",
-            "💳": "Kredito kortelė",
-            "🛍️": "Pirkinių krepšiai",
-            "🎊": "Konfeti",
-            "🎉": "Šventės popetas",
-            "💌": "Meilės laiškas",
-            "📦": "Pakuotė",
-            "🎫": "Bilietas",
-            "🏪": "Parduotuvė",
-            "💴": "Pinigai",
-            "💶": "Euro banknotas",
-            "🪙": "Moneta"
-        }
-        self.add_emojis_to_grid(shopping_layout, shopping_emojis)
-        shopping_tab.setLayout(shopping_layout)
-        emoji_tabs.addTab(shopping_tab, "🛍️ Apsipirkimas")
-
-        # Decorative and Attention
-        decorative_tab = QWidget()
-        decorative_layout = QGridLayout()
-        decorative_emojis = {
-            "⭐": "Žvaigždė",
-            "🌟": "Šviečianti žvaigždė",
-            "✨": "Kibirkštys",
-            "💫": "Svaigulys",
-            "⚡": "Žaibas",
-            "🔥": "Ugnis",
-            "❤️": "Raudona širdis",
-            "💜": "Violetinė širdis",
-            "💙": "Mėlyna širdis",
-            "🎨": "Paletė",
-            "🎭": "Menas",
-            "🎪": "Cirkas",
-            "🌈": "Vaivorykštė",
-            "🎯": "Taikinys",
-            "💡": "Lemputė",
-            "📢": "Garsiakalbis"
-        }
-        self.add_emojis_to_grid(decorative_layout, decorative_emojis)
-        decorative_tab.setLayout(decorative_layout)
-        emoji_tabs.addTab(decorative_tab, "✨ Dekoracijos")
-
-        # Seasons and Weather
-        seasons_tab = QWidget()
-        seasons_layout = QGridLayout()
-        seasons_emojis = {
-            "🌞": "Saulė",
-            "🌸": "Gėlė",
-            "🍁": "Klevo lapas",
-            "❄️": "Snaigė",
-            "🌺": "Hibiskas",
-            "🌷": "Tulpė",
-            "🌹": "Rožė",
-            "🌼": "Gėlytė",
-            "🍂": "Krintantys lapai",
-            "⛄": "Sniego senis",
-            "🌤️": "Saulė su debesiu",
-            "🌈": "Vaivorykštė",
-            "☔": "Lietsargis",
-            "🌊": "Banga",
-            "🎋": "Bambuko dekoracija",
-            "🎍": "Pušies dekoracija"
-        }
-        self.add_emojis_to_grid(seasons_layout, seasons_emojis)
-        seasons_tab.setLayout(seasons_layout)
-        emoji_tabs.addTab(seasons_tab, "🌸 Sezonai")
-
-        holiday_emoji_layout.addWidget(emoji_tabs)
-        main_layout.addLayout(holiday_emoji_layout)
-
-        # Body
-        body_label = QLabel("Laiško tekstas:")
-        self.bodyTextEdit = QTextEdit()
-        self.bodyTextEdit.setAcceptRichText(True)
-        main_layout.addWidget(body_label)
-        main_layout.addWidget(self.bodyTextEdit)
-
-        # Quick templates
-        templates_layout = QHBoxLayout()
-        templates = [
-            ("Įterpti pasisveikinimą", "Sveiki,\n\n")
+        # Format buttons
+        format_buttons = [
+            ('B', self.toggle_bold, 'Paryškintas tekstas'),
+            ('I', self.toggle_italic, 'Pasviręs tekstas'),
+            ('U', self.toggle_underline, 'Pabrauktas tekstas')
         ]
+        format_button_style = '''
+            QPushButton {
+                background-color: white;
+                color: black;
+                border: 2px solid black;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: black;
+                color: white;
+            }
+        '''
+        for text, func, tooltip in format_buttons:
+            btn = QPushButton(text)
+            btn.setToolTip(tooltip)
+            btn.clicked.connect(func)
+            btn.setFixedSize(40, 40)
+            btn.setStyleSheet(format_button_style)
+            toolbar.addWidget(btn)
+
+        # Link buttons
+        link_btn = QPushButton('🔗')
+        link_btn.setToolTip('Įterpti nuorodą')
+        link_btn.clicked.connect(self.insert_link)
+        link_btn.setFixedSize(40, 40)
+        link_btn.setStyleSheet(format_button_style)
+        toolbar.addWidget(link_btn)
+
+        unlink_btn = QPushButton('✕')
+        unlink_btn.setToolTip('Pašalinti nuorodą')
+        unlink_btn.clicked.connect(self.remove_link)
+        unlink_btn.setFixedSize(40, 40)
+        unlink_btn.setStyleSheet(format_button_style)
+        toolbar.addWidget(unlink_btn)
+
+        toolbar.addStretch()
+        editor_layout.addLayout(toolbar)
+
+        # Text editor with scroll
+        editor_scroll = QScrollArea()
+        editor_scroll.setWidgetResizable(True)
+        editor_scroll.setStyleSheet('''
+            QScrollArea {
+                border: 1px solid #000000;
+                border-radius: 4px;
+            }
+        ''')
         
-        for label, text in templates:
-            btn = QPushButton(label)
-            btn.clicked.connect(lambda checked, t=text: self.insert_template(t))
-            templates_layout.addWidget(btn)
+        self.text_edit = QTextEdit()
+        self.text_edit.setMinimumHeight(500)
+        self.text_edit.setStyleSheet('''
+            QTextEdit {
+                border: none;
+                padding: 10px;
+                font-size: 14px;
+            }
+        ''')
+        editor_scroll.setWidget(self.text_edit)
+        editor_layout.addWidget(editor_scroll)
         
-        main_layout.addLayout(templates_layout)
+        content_layout.addWidget(editor_container, stretch=2)
+
+        # Right side - Tools (1/3 width)
+        tools_container = QWidget()
+        tools_container.setMinimumWidth(450)  # Increased width for tools
+        tools_layout = QVBoxLayout(tools_container)
+        tools_layout.setSpacing(20)
+        tools_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Holiday promotions
+        promo_group = QGroupBox("Akcijų tekstai")
+        promo_layout = QVBoxLayout()
+        promo_layout.setContentsMargins(15, 10, 15, 15)
+        
+        self.promo_combo = QComboBox()
+        self.promo_combo.setStyleSheet('''
+            QComboBox {
+                padding: 8px;
+                border: 1px solid #000000;
+                border-radius: 4px;
+                background: white;
+                font-size: 14px;
+            }
+        ''')
+        
+        # Load holiday templates
+        try:
+            with open(os.path.join(self.data_dir, 'holiday_templates.json'), 'r', encoding='utf-8') as f:
+                templates = json.load(f)
+                for holiday in templates['promotions'].keys():
+                    template_data = templates['promotions'][holiday]
+                    notify_date = template_data.get('notify_date', '')
+                    if notify_date:
+                        month, day = notify_date.split('-')
+                        formatted_date = f"{int(day):02d}.{int(month):02d}"
+                        self.promo_combo.addItem(f"{holiday} - {formatted_date}")
+                    else:
+                        self.promo_combo.addItem(holiday)
+        except Exception as e:
+            print(f"Error loading templates: {str(e)}")
+        
+        promo_layout.addWidget(self.promo_combo)
+        
+        # Add insert button
+        insert_promo_btn = QPushButton('Įterpti akciją')
+        insert_promo_btn.clicked.connect(self.insert_promotion)
+        insert_promo_btn.setStyleSheet('''
+            QPushButton {
+                background-color: white;
+                color: black;
+                border: 2px solid black;
+                padding: 10px;
+                font-weight: bold;
+                margin-top: 10px;
+            }
+            QPushButton:hover {
+                background-color: black;
+                color: white;
+            }
+        ''')
+        promo_layout.addWidget(insert_promo_btn)
+        
+        promo_group.setLayout(promo_layout)
+        tools_layout.addWidget(promo_group)
+
+        # Emoji section (larger)
+        emoji_group = QGroupBox("Emoji")
+        emoji_group.setStyleSheet('''
+            QGroupBox {
+                font-weight: bold;
+                padding-top: 15px;
+            }
+        ''')
+        emoji_layout = QVBoxLayout()
+        emoji_layout.setSpacing(10)
+        emoji_layout.setContentsMargins(15, 10, 15, 15)
+        
+        # Emoji search field
+        self.emoji_search = QLineEdit()
+        self.emoji_search.setPlaceholderText("Ieškoti emoji...")
+        self.emoji_search.setStyleSheet('''
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #e0e0e0;
+                border-radius: 4px;
+            }
+        ''')
+        self.emoji_search.textChanged.connect(self.filter_emojis)
+        emoji_layout.addWidget(self.emoji_search)
+        
+        # Emoji grid scroll area
+        emoji_scroll = QScrollArea()
+        emoji_scroll.setWidgetResizable(True)
+        emoji_scroll.setMinimumHeight(300)
+        emoji_scroll.setStyleSheet('''
+            QScrollArea {
+                border: 1px solid #e0e0e0;
+                border-radius: 4px;
+            }
+            QScrollBar:vertical {
+                width: 12px;
+                background: #f0f0f0;
+            }
+            QScrollBar::handle:vertical {
+                background: #c0c0c0;
+                min-height: 20px;
+                border-radius: 6px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        ''')
+        
+        emoji_widget = QWidget()
+        self.emoji_grid = QGridLayout(emoji_widget)
+        self.emoji_grid.setSpacing(0)
+        self.emoji_grid.setContentsMargins(0, 0, 0, 0)
+        emoji_scroll.setWidget(emoji_widget)
+        emoji_layout.addWidget(emoji_scroll)
+        
+        emoji_group.setLayout(emoji_layout)
+        tools_layout.addWidget(emoji_group, stretch=2)  # More space for emojis
+
+        content_layout.addWidget(tools_container, stretch=1)
+        main_layout.addLayout(content_layout)
 
         # Send button
-        self.sendButton = QPushButton("Siųsti laiškus")
-        main_layout.addWidget(self.sendButton)
+        send_container = QHBoxLayout()
+        self.send_button = QPushButton("Siųsti")
+        self.send_button.clicked.connect(self.send_emails)
+        self.send_button.setFixedSize(200, 50)
+        self.send_button.setStyleSheet('''
+            QPushButton {
+                background-color: #000000;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 12px 24px;
+                font-weight: 500;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: #333333;
+            }
+        ''')
+        send_container.addStretch()
+        send_container.addWidget(self.send_button)
+        send_container.addStretch()
+        main_layout.addLayout(send_container)
 
-        # Log
-        log_label = QLabel("Siuntimo logas:")
-        self.logTextEdit = QTextEdit()
-        self.logTextEdit.setReadOnly(True)
-        main_layout.addWidget(log_label)
-        main_layout.addWidget(self.logTextEdit)
+        # Log area
+        log_group = QGroupBox("Log info")
+        log_group.setStyleSheet('''
+            QGroupBox {
+                font-weight: bold;
+                padding-top: 15px;
+                border: 1px solid #000000;
+                border-radius: 4px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        ''')
+        log_layout = QVBoxLayout()
+        log_layout.setContentsMargins(15, 10, 15, 15)
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setMinimumHeight(150)
+        self.log_text.setMaximumHeight(200)
+        self.log_text.setStyleSheet('''
+            QTextEdit {
+                border: 1px solid #000000;
+                border-radius: 4px;
+                padding: 10px;
+                font-family: 'Menlo', monospace;
+                font-size: 12px;
+                background-color: #f8f8f8;
+                color: #000000;
+            }
+        ''')
+        log_layout.addWidget(self.log_text)
+        log_group.setLayout(log_layout)
+        main_layout.addWidget(log_group)
 
-    def add_emojis_to_grid(self, layout, emojis):
+        # Load emojis
+        self.load_emojis()
+
+    def load_emojis(self):
+        emoji_data = self.load_emoji_data()
+        if emoji_data:
+            self.filter_emojis("")
+            # Holiday templates are already loaded in init_ui
+            
+    def filter_emojis(self, search_text):
+        # Clear existing emojis
+        while self.emoji_grid.count():
+            item = self.emoji_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        emoji_data = self.load_emoji_data()
+        search_text = search_text.lower()
+        
         row = 0
         col = 0
-        max_cols = 8
+        max_cols = 8  # Changed from 6 to 8 to fit more emojis
         
-        for emoji, tooltip in emojis.items():
-            btn = QPushButton(emoji)
-            btn.setToolTip(tooltip)
-            btn.setStyleSheet("font-size: 16px; padding: 5px;")
-            btn.clicked.connect(lambda checked, e=emoji: self.insert_emoji(e))
-            layout.addWidget(btn, row, col)
-            
-            col += 1
-            if col >= max_cols:
-                col = 0
-                row += 1
+        # First, count total emojis to show
+        total_emojis = 0
+        for category_id, category_data in emoji_data.items():
+            if 'emojis' in category_data:
+                total_emojis += len(category_data['emojis'])
+        
+        # Calculate optimal size based on total emojis
+        btn_size = 30 if total_emojis > 100 else 35  # Smaller size if many emojis
+        
+        for category_id, category_data in emoji_data.items():
+            if 'emojis' in category_data:
+                for emoji, description in category_data['emojis'].items():
+                    if search_text == "" or search_text in description.lower() or search_text in emoji.lower():
+                        btn = QPushButton(emoji)
+                        btn.setToolTip(description)
+                        btn.clicked.connect(lambda checked, e=emoji: self.insert_emoji(e))
+                        btn.setFixedSize(btn_size, btn_size)
+                        btn.setStyleSheet('''
+                            QPushButton { 
+                                font-size: 18px; 
+                                background-color: #ffffff;
+                                color: #000000;
+                                border: none;
+                                border-radius: 0;
+                                padding: 0;
+                                margin: 0;
+                            }
+                            QPushButton:hover {
+                                background-color: #f5f5f5;
+                            }
+                            QPushButton:pressed {
+                                background-color: #e0e0e0;
+                            }
+                        ''')
+                        
+                        self.emoji_grid.addWidget(btn, row, col)
+                        col += 1
+                        if col >= max_cols:
+                            col = 0
+                            row += 1
 
-    def insert_promotion(self):
-        selected_promotion = self.promotionComboBox.currentText()
-        promotion_text = self.holiday_promotions[selected_promotion]
-        cursor = self.bodyTextEdit.textCursor()
-        cursor.insertText(promotion_text)
+    def change_font(self, font_name):
+        cursor = self.text_edit.textCursor()
+        if cursor.hasSelection():
+            position = cursor.position()
+            anchor = cursor.anchor()
+            
+            format = cursor.charFormat()
+            format.setFontFamily(font_name)
+            cursor.mergeCharFormat(format)
+            
+            cursor.setPosition(anchor)
+            cursor.setPosition(position, QTextCursor.KeepAnchor)
+            self.text_edit.setTextCursor(cursor)
+        else:
+            self.text_edit.setFontFamily(font_name)
+
+    def change_font_size(self, size):
+        cursor = self.text_edit.textCursor()
+        if cursor.hasSelection():
+            position = cursor.position()
+            anchor = cursor.anchor()
+            
+            format = cursor.charFormat()
+            format.setFontPointSize(float(size))
+            cursor.mergeCharFormat(format)
+            
+            cursor.setPosition(anchor)
+            cursor.setPosition(position, QTextCursor.KeepAnchor)
+            self.text_edit.setTextCursor(cursor)
+        else:
+            self.text_edit.setFontPointSize(float(size))
 
     def toggle_bold(self):
-        cursor = self.bodyTextEdit.textCursor()
+        cursor = self.text_edit.textCursor()
         format = cursor.charFormat()
         format.setFontWeight(QFont.Bold if format.fontWeight() != QFont.Bold else QFont.Normal)
         cursor.mergeCharFormat(format)
-        self.bodyTextEdit.setCurrentCharFormat(format)
 
     def toggle_italic(self):
-        cursor = self.bodyTextEdit.textCursor()
+        cursor = self.text_edit.textCursor()
         format = cursor.charFormat()
         format.setFontItalic(not format.fontItalic())
         cursor.mergeCharFormat(format)
-        self.bodyTextEdit.setCurrentCharFormat(format)
 
     def toggle_underline(self):
-        cursor = self.bodyTextEdit.textCursor()
+        cursor = self.text_edit.textCursor()
         format = cursor.charFormat()
         format.setFontUnderline(not format.fontUnderline())
         cursor.mergeCharFormat(format)
-        self.bodyTextEdit.setCurrentCharFormat(format)
-
-    def choose_color(self):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            cursor = self.bodyTextEdit.textCursor()
-            format = cursor.charFormat()
-            format.setForeground(color)
-            cursor.mergeCharFormat(format)
-            self.bodyTextEdit.setCurrentCharFormat(format)
-
-    def change_font(self, font):
-        cursor = self.bodyTextEdit.textCursor()
-        format = cursor.charFormat()
-        format.setFont(font)
-        cursor.mergeCharFormat(format)
-        self.bodyTextEdit.setCurrentCharFormat(format)
-
-    def change_font_size(self, size):
-        cursor = self.bodyTextEdit.textCursor()
-        format = cursor.charFormat()
-        format.setFontPointSize(float(size))
-        cursor.mergeCharFormat(format)
-        self.bodyTextEdit.setCurrentCharFormat(format)
 
     def align_text(self, alignment):
-        cursor = self.bodyTextEdit.textCursor()
-        blockFormat = cursor.blockFormat()
-        
-        if alignment == 'left':
-            blockFormat.setAlignment(Qt.AlignLeft)
-        elif alignment == 'center':
-            blockFormat.setAlignment(Qt.AlignCenter)
-        elif alignment == 'right':
-            blockFormat.setAlignment(Qt.AlignRight)
-            
-        cursor.mergeBlockFormat(blockFormat)
-        self.bodyTextEdit.setTextCursor(cursor)
+        self.text_edit.setAlignment(alignment)
 
     def insert_link(self):
-        cursor = self.bodyTextEdit.textCursor()
-        if cursor.hasSelection():
-            text = cursor.selectedText()
-            dialog = LinkDialog(self)
-            if dialog.exec_() == QDialog.Accepted:
-                url = dialog.get_url()
-                if url:
-                    if not url.startswith(('http://', 'https://')):
-                        url = 'https://' + url
-                    cursor.insertHtml(f'<a href="{url}">{text}</a>')
-                    self.bodyTextEdit.setTextCursor(cursor)
+        cursor = self.text_edit.textCursor()
+        selected_text = cursor.selectedText()
+        
+        text, ok = QInputDialog.getText(self, 'Įterpti nuorodą', 
+                                      'Įveskite URL:', text='https://')
+        if ok and text:
+            if not selected_text:
+                selected_text = text
+            
+            link_html = f'<a href="{text}">{selected_text}</a>'
+            cursor.insertHtml(link_html)
 
     def remove_link(self):
-        cursor = self.bodyTextEdit.textCursor()
+        cursor = self.text_edit.textCursor()
         if cursor.hasSelection():
-            # Get the current character format
-            format = cursor.charFormat()
+            # Get the selected text
+            selected_text = cursor.selectedText()
             
-            # Remove the anchor property
+            # Create a new format without link properties
+            format = QTextCharFormat()
             format.setAnchor(False)
             format.setAnchorHref("")
+            format.setForeground(Qt.black)  # Reset text color
+            format.setFontUnderline(False)  # Remove underline
             
-            # Reset text color to black
-            format.setForeground(QColor("black"))
-            
-            # Remove underline
-            format.setFontUnderline(False)
-            
-            # Apply the modified format to the selected text
+            # Apply the new format to the selection
             cursor.mergeCharFormat(format)
-            self.bodyTextEdit.setTextCursor(cursor)
+            
+            # Insert the text without link
+            cursor.insertText(selected_text)
+        else:
+            # If no selection, just clear the current format
+            format = QTextCharFormat()
+            format.setAnchor(False)
+            format.setAnchorHref("")
+            format.setForeground(Qt.black)
+            format.setFontUnderline(False)
+            cursor.mergeCharFormat(format)
 
     def insert_emoji(self, emoji):
-        self.bodyTextEdit.insertPlainText(emoji)
+        cursor = self.text_edit.textCursor()
+        cursor.insertText(emoji)
 
-    def insert_template(self, template_text):
-        cursor = self.bodyTextEdit.textCursor()
-        cursor.insertText(template_text)
+    def insert_template(self, template):
+        cursor = self.text_edit.textCursor()
+        cursor.insertText(template)
+
+    def insert_promotion(self):
+        """Insert the selected promotion template into the editor."""
+        selected_holiday = self.promo_combo.currentText()
+        if selected_holiday:
+            # Extract the holiday name from the combo text (remove date if present)
+            holiday = selected_holiday.split(' - ')[0].strip()
+            try:
+                with open(os.path.join(self.data_dir, 'holiday_templates.json'), 'r', encoding='utf-8') as f:
+                    templates = json.load(f)
+                    if holiday in templates['promotions']:
+                        template_data = templates['promotions'][holiday]
+                        title = template_data.get('title', '')
+                        template = template_data.get('template', '')
+                        
+                        # Remove "Sveiki" if it exists at the beginning
+                        if template.startswith('Sveiki'):
+                            template = template[6:].strip()
+                        
+                        # Insert content without formatting
+                        cursor = self.text_edit.textCursor()
+                        cursor.insertText(f"{title}\n\n")
+                        cursor.insertText(f"{template}\n\n")
+            except Exception as e:
+                print(f"Error inserting promotion: {str(e)}")
+        self.text_edit.setFocus()
+
+    def update_promo_text(self, holiday):
+        # Remove this method as it's no longer needed
+        pass
+
+    def update_log(self, message):
+        """Update the log with a new message"""
+        try:
+            # Ensure the log text widget exists and is visible
+            if hasattr(self, 'log_text') and self.log_text is not None:
+                # Add timestamp to the message
+                timestamp = QtCore.QDateTime.currentDateTime().toString('yyyy-MM-dd HH:mm:ss')
+                log_message = f"[{timestamp}] {message}"
+                
+                # Append the message
+                self.log_text.append(log_message)
+                
+                # Ensure the widget is visible and updated
+                self.log_text.setVisible(True)
+                self.log_text.repaint()
+                
+                # Scroll to the bottom
+                scrollbar = self.log_text.verticalScrollBar()
+                if scrollbar:
+                    scrollbar.setValue(scrollbar.maximum())
+                
+                # Force UI update
+                QApplication.processEvents()
+        except Exception as e:
+            print(f"Error updating log: {str(e)}")
+
+    def send_emails(self):
+        subject = self.subject_input.text().strip()
+        content = self.text_edit.toHtml()
+        
+        if not subject:
+            QMessageBox.warning(self, 'Klaida', 'Prašome įvesti laiško antraštę!')
+            return
+            
+        if not content:
+            QMessageBox.warning(self, 'Klaida', 'Prašome įvesti laiško turinį!')
+            return
+
+        reply = QMessageBox.question(self, 'Patvirtinimas',
+                                   'Ar tikrai norite išsiųsti šį laišką?',
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            try:
+                # Clear and show initial message
+                self.log_text.clear()
+                self.update_log("Pradedamas laiškų siuntimas...")
+                
+                # Send emails
+                from send_emails import send_emails_to_clients
+                
+                # Read email addresses
+                email_list_path = os.path.join(self.data_dir, 'email_list.txt')
+                with open(email_list_path, 'r', encoding='utf-8') as f:
+                    email_addresses = [line.strip() for line in f if line.strip()]
+                
+                self.update_log(f"Rasta {len(email_addresses)} el. pašto adresų")
+                
+                # Send emails
+                for email in email_addresses:
+                    try:
+                        self.update_log(f"Siunčiamas laiškas: {email}")
+                        
+                        # Send email
+                        from send_emails import send_email
+                        send_email(
+                            sender_email="samanta@knygospigiau.lt",
+                            recipient_email=email,
+                            subject=subject,
+                            body=content,
+                            smtp_server="mail.knygospigiau.lt",
+                            smtp_port=465,
+                            username="samanta@knygospigiau.lt",
+                            password="KEo3D+9bIf.-"
+                        )
+                        
+                        self.update_log(f"✅ Sėkmingai išsiųstas laiškas: {email}")
+                        
+                    except Exception as e:
+                        self.update_log(f"❌ Klaida siunčiant laišką {email}: {str(e)}")
+                
+                self.update_log("Laiškų siuntimas baigtas")
+                QMessageBox.information(self, 'Sėkmė', 'Laiškų siuntimas baigtas!')
+            except Exception as e:
+                error_msg = f'Nepavyko išsiųsti laiškų: {str(e)}'
+                self.update_log(f"KLAIDA: {error_msg}")
+                QMessageBox.warning(self, 'Klaida', error_msg)
+
+    def show_emoji_picker(self):
+        picker = EmojiPicker(self)
+        picker.exec_()
 
 
 if __name__ == "__main__":
     import sys
     app = QtWidgets.QApplication(sys.argv)
-    Form = QtWidgets.QWidget()
-    ui = Ui_Form()
-    ui.setupUi(Form)
-    Form.show()
+    window = EmailSenderUI()
+    window.show()
     sys.exit(app.exec_())

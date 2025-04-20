@@ -1,67 +1,47 @@
-# Knygospigiau.lt Naujienlaiškių Sistema
+# Knygospigiau Newsletter Editor v2.0
 
-Programa skirta kurti ir siųsti naujienlaiškius Knygospigiau.lt klientams.
+Modernus naujienlaiškių redaktorius knygynui "Knygospigiau".
+
+## Naujausi pakeitimai (v2.0)
+
+- Visiškai atnaujintas vartotojo sąsajos dizainas
+- Patobulintas teksto redaktorius su emoji palaikymu
+- Automatinis šventinių akcijų blokų generavimas
+- Patobulinta laiškų siuntimo sistema
+- Optimizuotas programos veikimas
 
 ## Funkcijos
 
-- Šventinių akcijų šablonai
-- Teksto formatavimas (šriftai, dydžiai, spalvos)
-- Emojių įterpimas
-- Nuorodų valdymas
-- HTML laiškų kūrimas
-- Automatinis siuntimas visiems prenumeratoriams
-
-## Reikalavimai
-
-- Python 3.11 arba naujesnė versija
-- PyQt5
-- Kiti reikalavimai nurodyti requirements.txt faile
+- Rich text redaktorius su HTML formatavimu
+- Emoji įterpimo galimybė
+- Automatinis šventinių akcijų blokų generavimas
+- Laiškų siuntimas el. paštu
+- Žurnalo registravimas
+- Moderni, minimalistiška vartotojo sąsaja
 
 ## Diegimas
 
-1. Klonuokite repozitoriją:
-```bash
-git clone https://github.com/JUSU_USERNAME/naujienlaiskiai_knygospigiau.git
-cd naujienlaiskiai_knygospigiau
-```
+1. Atsisiųskite naujausią versiją
+2. Įdiekite reikalingus paketus:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Paleiskite programą:
+   ```bash
+   python email_sender_app.py
+   ```
 
-2. Sukurkite virtualią aplinką:
-```bash
-python -m venv venv
-source venv/bin/activate  # Unix/macOS
-# ARBA
-.\venv\Scripts\activate  # Windows
-```
+## Reikalavimai
 
-3. Įdiekite reikalingus paketus:
-```bash
-pip install -r requirements.txt
-```
-
-4. Sukurkite `email_list.txt` failą su gavėjų el. pašto adresais (po vieną eilutėje)
-
-5. Paleiskite programą:
-```bash
-python email_sender_app.py
-```
-
-## Programos sukūrimas
-
-Norėdami sukurti vykdomąjį failą:
-
-```bash
-pyinstaller --clean --windowed --name "Knygospigiau Newsletter" --add-data "email_sender_ui.py:." --add-data "send_emails.py:." --hidden-import PyQt5.QtCore --hidden-import PyQt5.QtWidgets --hidden-import send_emails --hidden-import email_sender_ui email_sender_app.py
-```
-
-## Naudojimas
-
-1. Paleiskite programą
-2. Įveskite laiško antraštę
-3. Pasirinkite šventinę akciją arba sukurkite savo tekstą
-4. Suformatuokite tekstą naudodami teksto formatavimo įrankius
-5. Įterpkite emojius ir nuorodas pagal poreikį
-6. Spauskite "Siųsti laiškus" kai laiškas paruoštas
+- Python 3.11+
+- PyQt5
+- Pillow
+- Jinja2
 
 ## Licencija
 
-Šis projektas yra privatus ir skirtas tik Knygospigiau.lt naudojimui. 
+MIT
+
+## Autorius
+
+Robertas Šimkus 

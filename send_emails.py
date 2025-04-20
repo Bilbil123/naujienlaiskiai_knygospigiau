@@ -25,16 +25,18 @@ logs_dir = os.path.join(application_path, 'logs')
 os.makedirs(data_dir, exist_ok=True)
 os.makedirs(logs_dir, exist_ok=True)
 
-# Set up logging to file and console
+# Set up logging
 log_file = os.path.join(logs_dir, 'email_log.txt')
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_file, encoding='utf-8', mode='w'),  # Use 'w' mode to clear the file
+        logging.FileHandler(log_file, encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
+
+logger = logging.getLogger(__name__)
 
 # Function to generate email signature
 def get_email_signature(use_html=False):
@@ -106,55 +108,107 @@ def send_email(sender_email, recipient_email, subject, body, smtp_server, smtp_p
         logging.error(f"❌ Kita klaida ({recipient_email}): {str(e)}")
         raise
 
-# Send to all clients
-def send_emails_to_clients(subject, body):
-    # Clear the log file at the start of sending
-    with open(log_file, 'w', encoding='utf-8') as f:
-        f.write('')
+def create_ssl_context():
+    """Create a secure SSL context with appropriate settings."""
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+def connect_to_smtp(server, port, username, password, max_retries=3, retry_delay=5):
+    """Attempt to connect to SMTP server with retry mechanism."""
+    context = create_ssl_context()
     
-    smtp_server = "mail.versloidejos.lt"
-    smtp_port = 587
-    sender_email = "info@versloidejos.lt"
-    username = sender_email
-    password = "^j19Yv4w2"
-    use_html = True
-
-    emails_per_hour = 30
-    sleep_duration = (3600 / emails_per_hour) + 5  # 125s
-
-    # Nuskaito el. paštų adresus iš failo
-    email_list_path = os.path.join(data_dir, 'email_list.txt')
-    try:
-        logging.info(f"Bandoma atidaryti el. paštų sąrašą: {email_list_path}")
-        with open(email_list_path, 'r', encoding='utf-8') as f:
-            email_list = [line.strip() for line in f if line.strip()]
-            logging.info(f"Rasta {len(email_list)} el. pašto adresų")
-    except FileNotFoundError:
-        logging.error(f"❌ email_list.txt nerastas! Ieškota: {email_list_path}")
-        raise FileNotFoundError(f"email_list.txt nerastas! Ieškota: {email_list_path}")
-
-    if not email_list:
-        logging.error("❌ El. paštų adresų failas tuščias!")
-        raise ValueError("El. paštų adresų failas tuščias!")
-
-    # Siunčia laiškus
-    total_sent = 0
-    for email in email_list:
+    for attempt in range(max_retries):
         try:
-            send_email(sender_email, email, subject, body, smtp_server, smtp_port, username, password, use_html)
-            total_sent += 1
-            logging.info(f"Išsiųsta laiškų: {total_sent}/{len(email_list)}")
-            if total_sent < len(email_list):
-                logging.info(f"Laukiama {sleep_duration} sekundžių prieš siunčiant kitą laišką...")
-                time.sleep(sleep_duration)
-        except Exception as e:
-            logging.error(f"❌ Klaida siunčiant laišką {email}: {str(e)}")
-            continue
+            logging.info(f"Attempting to connect to {server} on port {port} (attempt {attempt + 1}/{max_retries})")
+            
+            if port == 465:
+                # SSL connection
+                server = smtplib.SMTP_SSL(server, port, context=context, timeout=60)
+            else:
+                # STARTTLS connection
+                server = smtplib.SMTP(server, port, timeout=60)
+                server.set_debuglevel(1)  # Enable debug logging
+                server.ehlo()
+                if port == 587:  # Special handling for webmail on port 587
+                    server.starttls(context=context)
+                    server.ehlo()
+                server.login(username, password)
+            
+            logging.info(f"Successfully connected to {server} on port {port}")
+            return server
+            
+        except (smtplib.SMTPException, ssl.SSLError, ConnectionError) as e:
+            logging.error(f"Connection attempt {attempt + 1} failed: {str(e)}")
+            if attempt < max_retries - 1:
+                logging.info(f"Waiting {retry_delay} seconds before retrying...")
+                time.sleep(retry_delay)
+            else:
+                raise Exception(f"Failed to connect to SMTP server after {max_retries} attempts: {str(e)}")
 
-# Paleidimui iš terminalo
+def send_emails_to_clients(subject, body):
+    # Email configuration
+    sender_email = "samanta@knygospigiau.lt"
+    password = "KEo3D+9bIf.-"
+    smtp_server = "mail.knygospigiau.lt"
+    smtp_port = 465  # Using SMTPS (implicit SSL)
+    
+    # Create SSL context
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    
+    try:
+        # Read email addresses from file
+        email_list_path = os.path.join(data_dir, 'email_list.txt')
+        with open(email_list_path, 'r', encoding='utf-8') as f:
+            email_addresses = [line.strip() for line in f if line.strip()]
+        
+        logger.info(f"Rasta {len(email_addresses)} el. pašto adresų")
+        
+        # Connect to SMTP server
+        with smtplib.SMTP_SSL(smtp_server, smtp_port, context=context) as server:
+            server.login(sender_email, password)
+            logger.info("Sėkmingai prisijungta prie SMTP serverio")
+            
+            # Send emails
+            successful_sends = 0
+            for email in email_addresses:
+                try:
+                    # Create message
+                    msg = MIMEMultipart()
+                    msg['From'] = sender_email
+                    msg['To'] = email
+                    msg['Subject'] = subject
+                    
+                    # Add signature to the body
+                    full_body = body + get_email_signature(use_html=True)
+                    msg.attach(MIMEText(full_body, 'html'))
+                    
+                    # Send email
+                    server.send_message(msg)
+                    successful_sends += 1
+                    logger.info(f"Laiškas sėkmingai išsiųstas į {email}")
+                    time.sleep(1)  # Small delay between sends
+                    
+                except Exception as e:
+                    logger.error(f"Klaida siunčiant laišką į {email}: {str(e)}")
+                    continue
+            
+            logger.info(f"Baigtas laiškų siuntimas. Sėkmingai išsiųsta: {successful_sends} iš {len(email_addresses)}")
+            
+    except FileNotFoundError:
+        logger.error(f"Nerastas el. pašto adresų sąrašo failas: {email_list_path}")
+        raise
+    except Exception as e:
+        logger.error(f"Klaida siunčiant laiškus: {str(e)}")
+        raise
+
+# For running from terminal
 if __name__ == "__main__":
-    subject = "Testas iš terminalo"
-    body = """<p>Laba diena,</p>
-<p>Pranešame, kad visą balandžio mėnesį vyksta akcija – knygos pigiau!</p>
-<p>Ačiū, kad skaitote mūsų naujienlaiškį. Jei turite klausimų, kreipkitės!</p>"""
+    subject = "Test from terminal"
+    body = """<p>Hello,</p>
+<p>This is a test email.</p>
+<p>Thank you for reading our newsletter!</p>"""
     send_emails_to_clients(subject, body)

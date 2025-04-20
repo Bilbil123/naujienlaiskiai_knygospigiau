@@ -1,10 +1,13 @@
 import sys
 import os
 import time
-from PyQt5.QtWidgets import QApplication, QWidget, QMessageBox
-from PyQt5.QtCore import QTimer, QThread, pyqtSignal
-from email_sender_ui import Ui_Form
+import json
+from PyQt5.QtWidgets import (QApplication, QWidget, QMessageBox, QPushButton, 
+                           QLineEdit, QTextEdit, QVBoxLayout, QHBoxLayout, QLabel)
+from PyQt5.QtCore import QTimer, QThread, pyqtSignal, QDateTime, Qt
+from email_sender_ui import EmailSenderUI
 import send_emails
+import logging
 
 class EmailSenderThread(QThread):
     finished = pyqtSignal()
@@ -18,104 +21,124 @@ class EmailSenderThread(QThread):
 
     def run(self):
         try:
-            # Redirect stdout to our log update signal
-            import io
-            import sys
-            old_stdout = sys.stdout
-            sys.stdout = io.StringIO()
+            # Create a custom logging handler that emits signals
+            class SignalHandler(logging.Handler):
+                def __init__(self, signal):
+                    super().__init__()
+                    self.signal = signal
+
+                def emit(self, record):
+                    msg = self.format(record)
+                    self.signal.emit(msg)
+
+            # Set up logging to emit signals
+            handler = SignalHandler(self.log_update)
+            handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
             
+            # Get the logger from send_emails
+            logger = logging.getLogger()
+            logger.addHandler(handler)
+            
+            # Send emails
             send_emails.send_emails_to_clients(self.subject, self.body)
             
-            # Get the captured output and emit it
-            output = sys.stdout.getvalue()
-            self.log_update.emit(output)
-            
-            # Restore stdout
-            sys.stdout = old_stdout
+            # Remove our custom handler
+            logger.removeHandler(handler)
             
             self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
 
-class EmailSenderApp(Ui_Form):
+class EmailSenderApp(EmailSenderUI):
     def __init__(self):
-        super().__init__()
-        
-        # Get the application directory
+        # Set up the data directory first
         if getattr(sys, 'frozen', False):
             # Running as a bundled app
             if sys.platform == 'darwin':
-                # For macOS app bundle, we need to use the MacOS directory
-                application_path = os.path.dirname(sys.executable)
+                # For macOS app bundle
+                self.data_dir = os.path.join(os.path.dirname(sys.executable), 'data')
             else:
-                application_path = os.path.dirname(sys.executable)
+                self.data_dir = os.path.join(os.path.dirname(sys.executable), 'data')
         else:
             # Running as a script
-            application_path = os.path.dirname(os.path.abspath(__file__))
+            self.data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 
         # Create necessary directories
-        self.data_dir = os.path.join(application_path, 'data')
-        self.logs_dir = os.path.join(application_path, 'logs')
         os.makedirs(self.data_dir, exist_ok=True)
-        os.makedirs(self.logs_dir, exist_ok=True)
         
-        # Set log file path
-        self.log_file_path = os.path.join(self.logs_dir, 'email_log.txt')
-
-        # Connect the send button
-        self.sendButton.clicked.connect(self.send_emails)
-
+        # Create log file if it doesn't exist
+        self.log_file = os.path.join(self.data_dir, 'email_log.txt')
+        if not os.path.exists(self.log_file):
+            with open(self.log_file, 'w', encoding='utf-8') as f:
+                f.write('')  # Create empty file
+        
+        # Initialize parent class with data_dir
+        super().__init__(data_dir=self.data_dir)
+        
         # Set up log update timer
         self.log_timer = QTimer(self)
         self.log_timer.timeout.connect(self.update_log_display)
-        self.log_timer.start(1000)  # kas sekundę
+        self.log_timer.start(1000)  # Update every second
 
-        self.update_log_display()
+    def update_log_display(self):
+        try:
+            if os.path.exists(self.log_file):
+                with open(self.log_file, 'r', encoding='utf-8') as f:
+                    log_content = f.read()
+                if log_content:  # Only update if there's content
+                    self.log_text.setPlainText(log_content)
+                    # Scroll to bottom
+                    scrollbar = self.log_text.verticalScrollBar()
+                    scrollbar.setValue(scrollbar.maximum())
+        except Exception as e:
+            print(f"Error updating log display: {str(e)}")
 
     def send_emails(self):
-        subject = self.subjectLineEdit.text().strip()
-        body = self.bodyTextEdit.toHtml()  # Get HTML content
+        subject = self.subject_input.text().strip()
+        body = self.text_edit.toHtml()  # Get HTML content
 
         if not subject or not body:
             QMessageBox.warning(self, "Klaida", "Prašome užpildyti laiško antraštę ir tekstą!")
             return
 
-        self.sendButton.setEnabled(False)
+        # Update log immediately
+        self.log_text.append(f"[{QDateTime.currentDateTime().toString('yyyy-MM-dd HH:mm:ss')}] Pradedamas laiškų siuntimas...")
+        self.send_button.setEnabled(False)
 
         self.thread = EmailSenderThread(subject, body)
         self.thread.finished.connect(self.on_sending_finished)
         self.thread.error.connect(self.on_sending_error)
-        self.thread.log_update.connect(self.update_log_display)
+        self.thread.log_update.connect(self.on_log_update)
         self.thread.start()
 
+    def on_log_update(self, message):
+        self.log_text.append(message)
+        # Force scroll to bottom
+        scrollbar = self.log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
     def on_sending_finished(self):
-        self.sendButton.setEnabled(True)
+        self.send_button.setEnabled(True)
+        self.log_text.append(f"[{QDateTime.currentDateTime().toString('yyyy-MM-dd HH:mm:ss')}] Laiškai sėkmingai išsiųsti!")
         QMessageBox.information(self, "Sėkmė", "Laiškai sėkmingai išsiųsti!")
 
     def on_sending_error(self, error_message):
-        self.sendButton.setEnabled(True)
+        self.send_button.setEnabled(True)
+        self.log_text.append(f"[{QDateTime.currentDateTime().toString('yyyy-MM-dd HH:mm:ss')}] Klaida: {error_message}")
         QMessageBox.critical(self, "Klaida", f"Klaida siunčiant laiškus: {error_message}")
 
-    def update_log_display(self, new_log_content=None):
+    def load_emoji_data(self):
         try:
-            if new_log_content:
-                # If we received new log content from the thread, append it
-                current_content = self.logTextEdit.toPlainText()
-                self.logTextEdit.setPlainText(current_content + new_log_content)
-            else:
-                # Otherwise, read from the log file
-                with open(self.log_file_path, 'r', encoding='utf-8') as f:
-                    log_content = f.read()
-                self.logTextEdit.setPlainText(log_content)
-            
-            # Scroll to the bottom
-            self.logTextEdit.verticalScrollBar().setValue(
-                self.logTextEdit.verticalScrollBar().maximum())
-        except FileNotFoundError:
-            # Create empty log file if it doesn't exist
-            with open(self.log_file_path, 'w', encoding='utf-8') as f:
-                f.write('')
-            self.logTextEdit.setPlainText('')
+            emoji_path = os.path.join(self.data_dir, 'emoji_data.json')
+            if not os.path.exists(emoji_path):
+                print(f"Emoji data file not found at: {emoji_path}")  # Debug print
+                return {}
+            with open(emoji_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('categories', {})
+        except Exception as e:
+            print(f'Error loading emoji data: {str(e)}')  # Debug print
+            return {}
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
