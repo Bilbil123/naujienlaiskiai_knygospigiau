@@ -19,14 +19,41 @@ Modernus naujienlaiškių redaktorius knygynui "Knygospigiau".
 - Žurnalo registravimas
 - Moderni, minimalistiška vartotojo sąsaja
 
+## Reikalingi failai
+
+Programai veikti reikalingi šie failai:
+
+### Pagrindiniai failai:
+- `email_sender_app.py` - pagrindinis programos failas
+- `email_sender_ui.py` - vartotojo sąsajos kodas
+- `send_emails.py` - laiškų siuntimo funkcijos
+- `emoji_picker.py` - emoji pasirinkimo funkcionalumas
+
+### Duomenų failai:
+- `data/emoji_data.json` - emoji duomenų bazė
+- `data/holiday_templates.json` - šventinių akcijų šablonai
+- `data/email_list.txt` - gavėjų el. pašto adresų sąrašas
+- `data/email_log.txt` - laiškų siuntimo žurnalas
+
+### Šablonų failai:
+- `templates/emoji_picker.html` - emoji pasirinkimo šablonas
+
+### Konfigūracijos failai:
+- `requirements.txt` - Python paketų sąrašas
+- `README.md` - programos dokumentacija
+
 ## Diegimas
 
-1. Atsisiųskite naujausią versiją
+1. Atsisiųskite visus reikalingus failus iš GitHub repozitorijos
 2. Įdiekite reikalingus paketus:
    ```bash
    pip install -r requirements.txt
    ```
-3. Paleiskite programą:
+3. Sukurkite `data` aplanką ir įdėkite į jį reikalingus failus:
+   - `emoji_data.json`
+   - `holiday_templates.json`
+   - `email_list.txt` (su gavėjų el. pašto adresais)
+4. Paleiskite programą:
    ```bash
    python email_sender_app.py
    ```
